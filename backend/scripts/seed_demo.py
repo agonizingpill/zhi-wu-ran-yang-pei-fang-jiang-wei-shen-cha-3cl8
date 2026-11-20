@@ -5,6 +5,7 @@ from sqlalchemy import select,func
 from src.database import Base,engine,Session
 from src.models import User,DyeRecipe,Swatch,Trial
 from src.production_models import RecipeRevision,DyeBatch
+from src.sharing_models import PartnerFactory,FactoryGrant
 from src.auth import hash_password
 
 def seed():
@@ -36,6 +37,15 @@ def seed():
         if not db.scalar(select(DyeBatch).where(DyeBatch.code=='DB-DEMO-001')):db.add(DyeBatch(code='DB-DEMO-001',approved_trial_id=trial.id,kg=250,target_snapshot={'lot':ref.lot,'recipe_id':prod.id,'l':ref.l,'a':ref.a,'b':ref.b,'trial_delta_e':trial.delta_e}))
         for code,component,kg,expiry,state in [('DYE-A-1117','A',80,date(2027,12,31),'active'),('DYE-B-1117','B',40,date(2027,12,31),'active'),('DYE-C-1117','C',20,date(2027,12,31),'active'),('DYE-C-HOLD','C',5,date(2027,12,31),'quarantine'),('DYE-B-OLD','B',5,date(2026,1,1),'active')]:
             if not db.scalar(select(DyeLot).where(DyeLot.code==code)):db.add(DyeLot(code=code,component=component,available_kg=kg,expires_on=expiry,state=state))
+        partners=[('PARTNER-HR','宏润外协厂','hongrun-demo-token',[f'SW-{i:03}' for i in range(3,13)]),('PARTNER-JC','锦澄外协厂','jincheng-demo-token',['SW-013','SW-014'])]
+        for code,name,token,lots in partners:
+            factory=db.scalar(select(PartnerFactory).where(PartnerFactory.code==code))
+            if not factory:
+                factory=PartnerFactory(code=code,name=name,token=token,active=True,epoch=1);db.add(factory);db.flush()
+            for lot in lots:
+                sw=db.scalar(select(Swatch).where(Swatch.lot==lot))
+                if sw and not db.scalar(select(FactoryGrant).where(FactoryGrant.factory_id==factory.id,FactoryGrant.swatch_id==sw.id)):
+                    db.add(FactoryGrant(factory_id=factory.id,swatch_id=sw.id,granted_by='admin@qise.test'))
         db.commit()
         print({name:db.scalar(select(func.count()).select_from(model)) for name,model in [('users',User),('recipes',DyeRecipe),('swatches',Swatch)]})
 if __name__=='__main__':seed()

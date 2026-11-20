@@ -95,3 +95,23 @@ Seed再补5个染料批次：A80kg、B40kg、C20kg可用，C隔离5kg、B已过�
 续篇剧本：为200kg靛蓝缸称A3.6/B0.8/C0.4kg→色差实测合格并签放→禾里服装收样，林工签收后记录标准光源色差争议→申请100kg补染→主管批准→新试验关联新缸，称A1.6/B0.4/C0.2kg→新缸正常实测签放→主管关闭客诉。新库存、客户与补染证据独立归档`test-artifacts/gb-1021/v3/`。
 
 限制：库存仅染料批次扣料，不包含采购、货位、退库与盘点；客户运单和签收为本地人工凭据，未调用物流或客户门户。补染不出款、不改旧发样结论，不含合同索赔金额。Lab、光谱和工艺门限仍为模拟业务，需真实仪器及客户容差规范校准。
+
+
+## 外协厂图谱授权（2026-11-20）
+
+新增外协厂图谱共享模块，业务数据持久化到 PostgreSQL：
+
+- **按厂授权**：`PartnerFactory` 记录外协厂编号、名称、访问令牌、授权状态与授权代次 epoch；`FactoryGrant` 按厂登记获准的实测染样（厂+染样唯一，仅实测染样可授权）。建厂、授权染样、撤回、重新授权均为主管专属动作，由 JWT 后端依赖保护。
+- **只按获准光谱拟合**：出图任务只读取该厂获准的实测染样，PCA 坐标、解释方差与重构误差都与未授权染样无关；厂内全量图谱流程不受影响。
+- **撤权即失效**：撤回与重新授权都会使该厂 epoch 递增。已发布图谱按 epoch 匹配当前授权代次，撤权后外协只读视图与厂内当前图谱即刻失效；队列中的旧任务在取件时与发布前两次校验授权代次，撤权与发布并发时旧任务算完也不能落库放出。其他厂的授权与图谱照常可查。
+- **越权隔离**：外协凭各自令牌访问 `/shared/atlas`；任务号与厂绑定，凭别厂任务号查询一律 404。外协视图只含批号与坐标，不含配方编号、浓度与内部主键，厂内配方保持保密。
+- **厂内回查**：`AtlasPublication` 保存每次出图的染样清单与结果快照，撤权后厂内仍可回查旧图用过哪些染样。
+- **缺样说明**：获准实测染样不足 3 张时拒绝出图并说明原因；图谱页面提供授权、撤回与出图操作。
+
+新实体为 `PartnerFactory`、`FactoryGrant`、`AtlasPublication`，代码位于 `sharing_models.py`、`sharing_schemas.py`、`sharing_service.py`、`sharing_routes.py`；worker 同时消费 `atlas:queue` 与 `factory:atlas:queue`，发布前以行锁复核授权代次。前端图谱页新增外协面板，外协只读视图位于 `/#shared?token=…`（无需登录）。
+
+接口：`GET/POST /factories`、`GET/POST /factories/{id}/grants`、`POST /factories/{id}/revoke`、`POST /factories/{id}/authorize`、`POST /factories/{id}/atlas`、`GET /factories/{id}/atlas`、`GET /factories/{id}/jobs/{job_id}`、`GET /factories/{id}/publications`；外协：`GET /shared/atlas`、`GET /shared/atlas/jobs/{job_id}`（`?token=` 或 `X-Factory-Token` 头）。
+
+Seed 新增宏润（PARTNER-HR，10 张获准染样，令牌 `hongrun-demo-token`）与锦澄（PARTNER-JC，2 张，用于演示缺样说明，令牌 `jincheng-demo-token`）；重复 seed 不重复授权。worker 产物目录可用 `ARTIFACTS_DIR` 覆盖（默认 `/artifacts`）。
+
+续篇剧本：主管为宏润授权 10 张实测染样→出图并把只读链接交给外协→锦澄 2 张缺样被拒并说明原因→撤回宏润授权，已生成的图与排队任务即刻失效→重新授权后重新出图，厂内回查旧图用过的染样。
